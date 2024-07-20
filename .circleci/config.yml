@@ -26,6 +26,7 @@ jobs:
           name: Build container image
           command: |
             docker build /tmp/app -f Containerfile -t ghcr.io/markormesher/${CIRCLE_PROJECT_REPONAME}:$(git describe --tags)
+            docker build /tmp/app -f Containerfile -t ghcr.io/markormesher/${CIRCLE_PROJECT_REPONAME}:latest
             docker image ls
       - run:
           name: Maybe publish container image
