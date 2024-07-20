@@ -6,6 +6,11 @@ defaults: &defaults
     - image: cimg/base:2024.07
 
 jobs:
+  setup:
+    <<: *defaults
+    steps:
+      - checkout
+
   publish:
     <<: *defaults
     steps:
@@ -29,7 +34,13 @@ workflows:
   version: 2
   main:
     jobs:
+      - setup:
+          filters:
+            tags:
+              only: /.*/
       - publish:
+          requires:
+            - setup
           filters:
             tags:
               only: /.*/
