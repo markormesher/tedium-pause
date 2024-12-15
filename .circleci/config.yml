@@ -3,10 +3,10 @@ version: 2.1
 defaults: &defaults
   working_directory: /tmp/app
   docker:
-    - image: cimg/base:2024.12
+    - image: cimg/go:1.23.4
 
 jobs:
-  setup:
+  checkout:
     <<: *defaults
     steps:
       - checkout
@@ -15,7 +15,20 @@ jobs:
           paths:
             - .
 
-  publish:
+  fetch-task:
+    <<: *defaults
+    docker:
+      - image: ghcr.io/markormesher/task-fetcher:v0.4.1
+    steps:
+      - run:
+          name: Fetch task binary
+          command: cp /task .
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+
+  img:
     <<: *defaults
     steps:
       - attach_workspace:
@@ -24,29 +37,30 @@ jobs:
           docker_layer_caching: true
       - run:
           name: Build container image
-          command: |
-            docker build /tmp/app -f Containerfile -t ghcr.io/markormesher/${CIRCLE_PROJECT_REPONAME}:$(git describe --tags)
-            docker build /tmp/app -f Containerfile -t ghcr.io/markormesher/${CIRCLE_PROJECT_REPONAME}:latest
-            docker image ls
+          command: ./task img-build
       - run:
-          name: Maybe publish container image
+          name: Maybe push container image
           command: |
-            if ! git describe --exact-match HEAD > /dev/null 2>&1; then echo "Not on tagged commit - nothing to do"; exit 0; fi
+            if ! git describe --exact-match HEAD >/dev/null 2>&1; then echo "Not on tagged commit - nothing to do"; exit 0; fi
             echo "${GHCR_PUBLISH_TOKEN}" | docker login ghcr.io -u markormesher --password-stdin
-            docker push ghcr.io/markormesher/${CIRCLE_PROJECT_REPONAME}:$(git describe --tags)
-            docker push ghcr.io/markormesher/${CIRCLE_PROJECT_REPONAME}:latest
+            ./task img-push
 
 workflows:
   version: 2
   main:
     jobs:
-      - setup:
+      - checkout:
           filters:
             tags:
               only: /.*/
-      - publish:
+      - fetch-task:
+          filters:
+            tags:
+              only: /.*/
+      - img:
           requires:
-            - setup
+            - checkout
+            - fetch-task
           filters:
             tags:
               only: /.*/

@@ -1,0 +1,101 @@
+version: "3"
+tasks:
+  img-build:
+    cmds:
+      - task: img-build-root
+  img-build-root:
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - cmd: |-
+          set -euo pipefail
+
+          if command -v podman >/dev/null 2>&1; then
+            # Podman for building locally or in Tatsu CI
+            builder=podman
+          elif command -v docker >/dev/null 2>&1; then
+            # Docker for building in Circle CI
+            builder=docker
+          else
+            echo "Cannot find Podman or Docker installed - image will not be built" >&2
+            exit 1
+          fi
+
+          img_name=$( (grep "LABEL image.name=" Containerfile || echo) | head -n 1 | cut -d '=' -f 2-)
+          img_registry=$( (grep "LABEL image.registry=" Containerfile || echo) | head -n 1 | cut -d '=' -f 2-)
+          if git describe --tags >/dev/null 2>&1; then
+            version=$(git describe --tags)
+            major_version=$(echo "${version}" | cut -d '.' -f 1)
+            latest_version_overall=$(git tag -l | sort --reverse --version-sort | head -n 1)
+            latest_version_within_major=$(git tag -l | grep "^${major_version}" | sort --reverse --version-sort | head -n 1)
+          else
+            version=""
+          fi
+
+          # First build to get visible logs
+          $builder build -f Containerfile .
+
+          # Second (cached) build to get the image ID
+          img=$($builder build -q -f Containerfile .)
+
+          if [[ ! -z "$img_name" ]]; then
+            $builder tag "$img" "localhost/${img_name}${version:+:$version}"
+
+            if [[ ! -z "$img_registry" ]]; then
+              $builder tag "$img" "${img_registry}/${img_name}${version:+:$version}"
+            fi
+          else
+            echo "Warning: no image name label; this image has not been tagged" >&2
+          fi
+  img-push:
+    cmds:
+      - task: img-push-root
+  img-push-root:
+    dir: '{{.ROOT_DIR}}'
+    cmds:
+      - cmd: |-
+          set -euo pipefail
+
+          if command -v podman >/dev/null 2>&1; then
+            # Podman for building locally or in Tatsu CI
+            builder=podman
+          elif command -v docker >/dev/null 2>&1; then
+            # Docker for building in Circle CI
+            builder=docker
+          else
+            echo "Cannot find Podman or Docker installed - image will not be built" >&2
+            exit 1
+          fi
+
+          img_name=$( (grep "LABEL image.name=" Containerfile || echo) | head -n 1 | cut -d '=' -f 2-)
+          img_registry=$( (grep "LABEL image.registry=" Containerfile || echo) | head -n 1 | cut -d '=' -f 2-)
+          if git describe --tags >/dev/null 2>&1; then
+            version=$(git describe --tags)
+            major_version=$(echo "${version}" | cut -d '.' -f 1)
+            latest_version_overall=$(git tag -l | sort --reverse --version-sort | head -n 1)
+            latest_version_within_major=$(git tag -l | grep "^${major_version}" | sort --reverse --version-sort | head -n 1)
+          else
+            version=""
+          fi
+
+          if [[ "$img_name" == "" ]]; then
+            echo "Cannot determine image name - image will not be pushed" >&2
+            exit 1
+          elif [[ "$img_registry" == "" ]]; then
+            echo "Cannot determine image registry - image will not be pushed" >&2
+            exit 1
+          elif [[ "$version" == "" ]]; then
+            echo "Cannot determine image version - image will not be pushed" >&2
+            exit 1
+          else
+            $builder push "${img_registry}/${img_name}:${version}"
+
+            if [[ "${version}" == "${latest_version_within_major}" ]]; then
+              $builder tag "${img_registry}/${img_name}:${version}" "${img_registry}/${img_name}:${major_version}"
+              $builder push "${img_registry}/${img_name}:${major_version}"
+            fi
+
+            if [[ "${version}" == "${latest_version_overall}" ]]; then
+              $builder tag "${img_registry}/${img_name}:${version}" "${img_registry}/${img_name}:latest"
+              $builder push "${img_registry}/${img_name}:latest"
+            fi
+          fi
